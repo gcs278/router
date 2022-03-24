@@ -1,5 +1,11 @@
 package templaterouter
 
+import (
+	"fmt"
+	"os"
+	"text/template"
+)
+
 // NewFakeTemplateRouter provides an empty template router with a simple certificate manager
 // backed by a fake cert writer for testing
 func NewFakeTemplateRouter() *templateRouter {
@@ -53,4 +59,32 @@ func newFakeCertificateManagerConfig() *certificateManagerConfig {
 		certDir:         certDir,
 		caCertDir:       caCertDir,
 	}
+}
+
+func (r *templateRouter) FakeTemplates(templatePath string, outputDir string) {
+	r.templates = map[string]*template.Template{}
+
+	masterTemplate, err := template.New("config").Funcs(helperFunctions).ParseFiles(templatePath)
+	if err != nil {
+		fmt.Println(fmt.Errorf("ERROR GENERATING TEMPLATE: %v", err))
+		os.Exit(1)
+	}
+
+	for _, template := range masterTemplate.Templates() {
+		if template.Name() == templatePath {
+			continue
+		}
+		templateWithHelper, err := createTemplateWithHelper(template)
+		if err != nil {
+			fmt.Println(fmt.Errorf("ERROR GENERATING TEMPLATE HELPER: %v", err))
+			os.Exit(1)
+		}
+
+		r.templates[template.Name()] = templateWithHelper
+	}
+	r.dir = outputDir
+}
+
+func (r *templateRouter) FakeWriteConfig() {
+	r.writeConfig()
 }

@@ -526,6 +526,10 @@ func (r *templateRouter) commitAndReload() error {
 	return nil
 }
 
+func writeConfig(r *templateRouter) {
+	r.writeConfig()
+}
+
 // writeConfig writes the config to disk
 // Must be called while holding r.lock
 func (r *templateRouter) writeConfig() error {
