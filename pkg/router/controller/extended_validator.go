@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 
 	kapi "k8s.io/api/core/v1"
 
@@ -21,15 +22,25 @@ type ExtendedValidator struct {
 
 	// recorder is an interface for indicating route rejections.
 	recorder RejectionRecorder
+
+	metricPostUpgradeInvalidRoute prometheus.Gauge
 }
 
 // NewExtendedValidator creates a plugin wrapper that ensures only routes that
 // pass extended validation are relayed to the next plugin in the chain.
 // Recorder is an interface for indicating why a route was rejected.
 func NewExtendedValidator(plugin router.Plugin, recorder RejectionRecorder) *ExtendedValidator {
+	metricPostUpgradeInvalidRoute := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "template_router",
+		Name:      "post_invalid_route",
+		Help:      "Metric to track number of routes that would be invalid in the next upgrade.",
+	})
+	prometheus.MustRegister(metricPostUpgradeInvalidRoute)
+
 	return &ExtendedValidator{
-		plugin:   plugin,
-		recorder: recorder,
+		plugin:                        plugin,
+		recorder:                      recorder,
+		metricPostUpgradeInvalidRoute: metricPostUpgradeInvalidRoute,
 	}
 }
 
@@ -53,6 +64,9 @@ func (p *ExtendedValidator) HandleRoute(eventType watch.EventType, route *routev
 		p.recorder.RecordRouteRejection(route, "ExtendedValidationFailed", err.Error())
 		p.plugin.HandleRoute(watch.Deleted, route)
 		return fmt.Errorf("invalid route configuration")
+	} else if err := routeapihelpers.PostUpgradeRouteValidation(route).ToAggregate(); err != nil {
+		log.Error(err, "route failed post upgrade validation", "route", routeName)
+		p.metricPostUpgradeInvalidRoute.Add(1)
 	}
 
 	return p.plugin.HandleRoute(eventType, route)

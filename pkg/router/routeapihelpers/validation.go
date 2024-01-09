@@ -367,3 +367,32 @@ func validateCertificatePEM(certPEM string, options *x509.VerifyOptions) ([]*x50
 
 	return certs, nil
 }
+
+// PostUpgradeRouteValidation performs a post-upgrade validation for
+// a route. This checks for issues that will cause failures in the next
+// OpenShift version.
+func PostUpgradeRouteValidation(route *routev1.Route) field.ErrorList {
+	tlsConfig := route.Spec.TLS
+	result := field.ErrorList{}
+
+	if tlsConfig == nil {
+		return result
+	}
+
+	tlsCertFieldPath := field.NewPath("spec").Child("tls").Child("certificate")
+	if len(tlsConfig.Certificate) > 0 {
+		certs, err := cert.ParseCertsPEM([]byte(tlsConfig.Certificate))
+		if err != nil {
+			return result
+		}
+
+		if len(certs) < 1 {
+			return result
+		}
+
+		if certs[0].SignatureAlgorithm == x509.SHA1WithRSA || certs[0].SignatureAlgorithm == x509.ECDSAWithSHA1 {
+			result = append(result, field.Invalid(tlsCertFieldPath, "redacted destination ca certificate data", "next version of OpenShift does not support SHA1"))
+		}
+	}
+	return result
+}
