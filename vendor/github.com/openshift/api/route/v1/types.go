@@ -369,14 +369,17 @@ type RouteIngressConditionType string
 const (
 	// RouteAdmitted means the route is able to service requests for the provided Host
 	RouteAdmitted RouteIngressConditionType = "Admitted"
-	// TODO: add other route condition types
+	// RouteDeprecated indicates that the route is using a deprecated configuration that may
+	// be incompatible with a future version of OpenShift. If this set to true on any route,
+	// the ingress operator may block upgrades.
+	RouteDeprecated RouteIngressConditionType = "Deprecated"
 )
 
 // RouteIngressCondition contains details for the current condition of this route on a particular
 // router.
 type RouteIngressCondition struct {
 	// Type is the type of the condition.
-	// Currently only Admitted.
+	// Currently only Admitted or Deprecated.
 	Type RouteIngressConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=RouteIngressConditionType"`
 	// Status is the status of the condition.
 	// Can be True, False, Unknown.
