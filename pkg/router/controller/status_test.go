@@ -2,6 +2,8 @@ package controller
 
 import (
 	"fmt"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"testing"
 	"time"
 
@@ -133,9 +135,14 @@ func (t *fakeTracker) Clear(id string, ingress *routev1.RouteIngress) {
 	if t.cleared == nil {
 		t.cleared = make(map[string]recorded)
 	}
+	lastTouchedTime := ingressConditionTouched(ingress)
+	if lastTouchedTime == nil {
+		now := nowFn()
+		lastTouchedTime = &now
+	}
 	t.cleared[id] = recorded{
 		ingress: ingress,
-		at:      ingressConditionTouched(ingress).Time,
+		at:      lastTouchedTime.Time,
 	}
 }
 
@@ -199,7 +206,7 @@ func checkResult(t *testing.T, err error, c *fake.Clientset, admitter *StatusAdm
 	if targetCachedTime != nil {
 		switch tracker := admitter.tracker.(type) {
 		case *SimpleContentionTracker:
-			if tracker.ids["uid1"].at != *targetCachedTime {
+			if tracker.ids["uid1_Admitted"].at != *targetCachedTime {
 				t.Fatalf("unexpected status time")
 			}
 		}
@@ -502,7 +509,7 @@ func TestStatusRecordRejectionOnHostUpdateOnly(t *testing.T) {
 	if condition.LastTransitionTime == nil || *condition.LastTransitionTime != now || condition.Status != corev1.ConditionFalse || condition.Reason != "Failed" || condition.Message != "generic error" {
 		t.Fatalf("unexpected condition: %#v", condition)
 	}
-	if tracker.contended["uid1"].at != now.Time || tracker.cleared["uid1"].at.IsZero() {
+	if tracker.contended["uid1_Admitted"].at != now.Time || tracker.cleared["uid1_Admitted"].at.IsZero() {
 		t.Fatal(tracker)
 	}
 }
@@ -580,7 +587,7 @@ func TestStatusFightBetweenReplicas(t *testing.T) {
 	err := admitter1.HandleRoute(watch.Added, route1)
 
 	outObj1 := checkResult(t, err, c1, admitter1, "route1.test.local", now1, &now1.Time, 0, 0)
-	if tracker1.cleared["uid1"].at != now1.Time {
+	if tracker1.cleared["uid1_Admitted"].at != now1.Time {
 		t.Fatal(tracker1)
 	}
 	outObj1 = outObj1.DeepCopy()
@@ -596,14 +603,14 @@ func TestStatusFightBetweenReplicas(t *testing.T) {
 	err = admitter2.HandleRoute(watch.Added, outObj1)
 
 	outObj2 := checkResult(t, err, c2, admitter2, "route1.test-new.local", now2, &now2.Time, 0, 0)
-	if tracker2.cleared["uid1"].at != now2.Time {
+	if tracker2.cleared["uid1_Admitted"].at != now2.Time {
 		t.Fatal(tracker2)
 	}
 	outObj2 = outObj2.DeepCopy()
 
 	lister1.items[0] = outObj2
 
-	tracker1.results = map[string]bool{"uid1": true}
+	tracker1.results = map[string]bool{"uid1_Admitted": true}
 	now3 := metav1.Time{Time: now1.Time.Add(time.Minute)}
 	nowFn = func() metav1.Time { return now3 }
 	outObj2.Spec.Host = "route1.test.local"
@@ -674,7 +681,7 @@ func TestStatusFightBetweenRouters(t *testing.T) {
 	err := admitter1.HandleRoute(watch.Added, route1)
 
 	checkResult(t, err, c1, admitter1, "route2.test-new.local", now1, nil, 1, 0)
-	if tracker.contended["uid1"].at != now1.Time || !tracker.cleared["uid1"].at.IsZero() {
+	if tracker.contended["uid1_Admitted"].at != now1.Time || !tracker.cleared["uid1_Admitted"].at.IsZero() {
 		t.Fatalf("should have recorded uid1 into tracker: %#v", tracker)
 	}
 
@@ -683,7 +690,7 @@ func TestStatusFightBetweenRouters(t *testing.T) {
 	nowFn = func() metav1.Time { return now2 }
 	touched2 := metav1.Time{Time: now2.Add(-time.Minute)}
 	tracker.cleared = nil
-	tracker.results = map[string]bool{"uid1": true}
+	tracker.results = map[string]bool{"uid1_Admitted": true}
 	route2 := &routev1.Route{
 		ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
 		Spec:       routev1.RouteSpec{Host: "route2.test-new.local"},
@@ -718,7 +725,7 @@ func TestStatusFightBetweenRouters(t *testing.T) {
 	err = admitter1.HandleRoute(watch.Modified, route2)
 
 	checkResult(t, err, c1, admitter1, "route2.test-new.local", now1, &now2.Time, 1, 0)
-	if tracker.contended["uid1"].at != now2.Time {
+	if tracker.contended["uid1_Admitted"].at != now2.Time {
 		t.Fatalf("should have recorded uid1 into tracker: %#v", tracker)
 	}
 }
@@ -794,19 +801,21 @@ func TestRouterContention(t *testing.T) {
 
 	// if we observe a single change to our ingress, record it but still update
 	otherObj := currObj.DeepCopy()
+	otherObjKey := string(otherObj.UID) + "_Admitted"
 	ingress := findIngressForRoute(otherObj, "test")
 	ingress.Host = "route1.other1.local"
-	t1.Changed(string(otherObj.UID), ingress)
+	t1.Changed(otherObjKey, ingress)
 	if t1.IsChangeContended(string(otherObj.UID), nowFn().Time, ingress) {
 		t.Fatal("change shouldn't be contended yet")
 	}
 	currObj = makePass(t, "route1.test.local", r1, otherObj, true, false)
+	currObjKey := string(currObj.UID) + "_Admitted"
 
 	// updating the route sets us back to candidate, but if we observe our own write
 	// we stay in candidate
 	ingress = findIngressForRoute(currObj, "test").DeepCopy()
-	t1.Changed(string(currObj.UID), ingress)
-	if t1.IsChangeContended(string(currObj.UID), nowFn().Time, ingress) {
+	t1.Changed(currObjKey, ingress)
+	if t1.IsChangeContended(currObjKey, nowFn().Time, ingress) {
 		t.Fatal("change should not be contended")
 	}
 	makePass(t, "route1.test.local", r1, currObj, false, false)
@@ -814,8 +823,8 @@ func TestRouterContention(t *testing.T) {
 	// updating the route sets us back to candidate, and if we detect another change to
 	// ingress we will go into conflict, even with our original write
 	ingress = ingressChangeWithNewHost(currObj, "test", "route1.other2.local")
-	t1.Changed(string(currObj.UID), ingress)
-	if !t1.IsChangeContended(string(currObj.UID), nowFn().Time, ingress) {
+	t1.Changed(currObjKey, ingress)
+	if !t1.IsChangeContended(currObjKey, nowFn().Time, ingress) {
 		t.Fatal("change should be contended")
 	}
 	makePass(t, "route1.test.local", r1, currObj, false, false)
@@ -823,9 +832,9 @@ func TestRouterContention(t *testing.T) {
 	// another contending write occurs, but the tracker isn't flushed so
 	// we stay contended
 	ingress = ingressChangeWithNewHost(currObj, "test", "route1.other3.local")
-	t1.Changed(string(currObj.UID), ingress)
+	t1.Changed(currObjKey, ingress)
 	t1.flush()
-	if !t1.IsChangeContended(string(currObj.UID), nowFn().Time, ingress) {
+	if !t1.IsChangeContended(currObjKey, nowFn().Time, ingress) {
 		t.Fatal("change should be contended")
 	}
 	makePass(t, "route1.test.local", r1, currObj, false, false)
@@ -847,6 +856,550 @@ func TestRouterContention(t *testing.T) {
 	t1.Changed(string(currObj.UID), findIngressForRoute(currObj, "test"))
 	t1.Changed(string(currObj.UID), findIngressForRoute(currObj, "test"))
 	currObj = makePass(t, "route6.test.local", r1, currObj, true, false)
+}
+
+func TestStatusDeprecated(t *testing.T) {
+	deprecatedReason := "DeprecatedValidationFailed"
+	deprecatedMessage := "next version of OpenShift does not support SHA1"
+	now := nowFn()
+	testCases := []struct {
+		name          string
+		routerName    string
+		deprecated    bool
+		route         *routev1.Route
+		expectedRoute *routev1.Route
+	}{
+		{
+			name:       "not deprecated should have no condition",
+			routerName: "test",
+			route: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+			},
+			expectedRoute: nil,
+		},
+		{
+			name:       "add deprecated condition",
+			routerName: "test",
+			deprecated: true,
+			route: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+			},
+			expectedRoute: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.test.local",
+					RouterName: "test",
+					Conditions: []routev1.RouteIngressCondition{{
+						Type:    routev1.RouteDeprecated,
+						Status:  corev1.ConditionTrue,
+						Reason:  deprecatedReason,
+						Message: deprecatedMessage,
+					}},
+				},
+				}},
+			},
+		},
+		{
+			name:       "remove deprecated condition if not deprecated",
+			routerName: "test",
+			route: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.test.local",
+					RouterName: "test",
+					Conditions: []routev1.RouteIngressCondition{{
+						Type:               routev1.RouteDeprecated,
+						Status:             corev1.ConditionTrue,
+						Reason:             deprecatedReason,
+						Message:            deprecatedMessage,
+						LastTransitionTime: &now,
+					}},
+				}},
+				},
+			},
+			expectedRoute: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.test.local",
+					RouterName: "test",
+				}},
+				},
+			},
+		},
+		{
+			name:       "remove deprecated condition if not deprecated with another status",
+			routerName: "test",
+			route: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.test.local",
+					RouterName: "test",
+					Conditions: []routev1.RouteIngressCondition{
+						{
+							Type:               "AnotherType",
+							Status:             corev1.ConditionTrue,
+							Reason:             "AnotherStatusReason",
+							Message:            "a message for AnotherStatusReason",
+							LastTransitionTime: &now,
+						},
+						{
+							Type:               routev1.RouteDeprecated,
+							Status:             corev1.ConditionTrue,
+							Reason:             deprecatedReason,
+							Message:            deprecatedMessage,
+							LastTransitionTime: &now,
+						},
+					},
+				}},
+				},
+			},
+			expectedRoute: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.test.local",
+					RouterName: "test",
+					Conditions: []routev1.RouteIngressCondition{{
+						Type:    "AnotherType",
+						Status:  corev1.ConditionTrue,
+						Reason:  "AnotherStatusReason",
+						Message: "a message for AnotherStatusReason",
+					}},
+				}},
+				},
+			},
+		},
+		{
+			name:       "add deprecated condition with existing status condition",
+			routerName: "test",
+			deprecated: true,
+			route: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.test.local",
+					RouterName: "test",
+					Conditions: []routev1.RouteIngressCondition{{
+						Type:               "AnotherType",
+						Status:             corev1.ConditionTrue,
+						Reason:             "AnotherStatusReason",
+						Message:            "a message for AnotherStatusReason",
+						LastTransitionTime: &now,
+					}},
+				}},
+				},
+			},
+			expectedRoute: &routev1.Route{
+				ObjectMeta: metav1.ObjectMeta{Name: "route1", Namespace: "default", UID: types.UID("uid1")},
+				Spec:       routev1.RouteSpec{Host: "route1.test.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.test.local",
+					RouterName: "test",
+					Conditions: []routev1.RouteIngressCondition{
+						{
+							Type:    "AnotherType",
+							Status:  corev1.ConditionTrue,
+							Reason:  "AnotherStatusReason",
+							Message: "a message for AnotherStatusReason",
+						},
+						{
+							Type:    routev1.RouteDeprecated,
+							Status:  corev1.ConditionTrue,
+							Reason:  deprecatedReason,
+							Message: deprecatedMessage,
+						},
+					},
+				}},
+				},
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := nowFn()
+			nowFn = func() metav1.Time { return now }
+			p := &fakePlugin{}
+			c := fake.NewSimpleClientset(tc.route)
+			tracker := &fakeTracker{}
+			lister := &routeLister{items: []*routev1.Route{tc.route}}
+			admitter := NewStatusAdmitter(p, c.RouteV1(), lister, tc.routerName, "", noopLease{}, tracker)
+			if tc.deprecated {
+				admitter.RecordRouteDeprecated(tc.route, deprecatedReason, deprecatedMessage)
+			} else {
+				admitter.RecordRouteNotDeprecated(tc.route)
+			}
+
+			// If expected route is nil, then assume we expect nothing to happen.
+			if tc.expectedRoute == nil {
+				if len(c.Actions()) != 0 {
+					t.Fatalf("expected 0 actions, but got %d: %#v", len(c.Actions()), c.Actions())
+				}
+			} else {
+				if len(c.Actions()) != 1 {
+					t.Fatalf("expected 1 actions, but got %d: %#v", len(c.Actions()), c.Actions())
+				}
+				action := c.Actions()[0]
+				if action.GetVerb() != "update" || action.GetResource().Resource != "routes" || action.GetSubresource() != "status" {
+					t.Fatalf("unexpected action: %#v", action)
+				}
+				obj := c.Actions()[0].(clientgotesting.UpdateAction).GetObject().(*routev1.Route)
+
+				// Compare expected route, but ignore LastTransitionTime since that is generated
+				cmpOpts := []cmp.Option{
+					cmpopts.EquateEmpty(),
+					cmpopts.IgnoreFields(routev1.RouteIngressCondition{}, "LastTransitionTime"),
+				}
+				if diff := cmp.Diff(tc.expectedRoute, obj, cmpOpts...); len(diff) > 0 {
+					t.Errorf("mismatched routes (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+func Test_recordIngressCondition(t *testing.T) {
+	admittedTrueCondition := routev1.RouteIngressCondition{
+		Type:    routev1.RouteAdmitted,
+		Status:  corev1.ConditionTrue,
+		Reason:  "Test",
+		Message: "test",
+	}
+	deprecatedTrueCondition := routev1.RouteIngressCondition{
+		Type:    routev1.RouteDeprecated,
+		Status:  corev1.ConditionTrue,
+		Reason:  "Test",
+		Message: "test",
+	}
+	testCases := []struct {
+		name                    string
+		route                   *routev1.Route
+		routerName              string
+		routerCanonicalHostname string
+		condition               routev1.RouteIngressCondition
+		expectedRoute           *routev1.Route
+		expectCreated           bool
+		expectChanged           bool
+	}{
+		{
+			name:                    "add new ingress with condition",
+			routerName:              "foo",
+			routerCanonicalHostname: "router-foo.foo.local",
+			route: &routev1.Route{
+				Spec:   routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{},
+			},
+			condition: admittedTrueCondition,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "foo.foo.local",
+					RouterName:              "foo",
+					RouterCanonicalHostname: "router-foo.foo.local",
+					Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition}},
+				}},
+			},
+			expectChanged: true,
+			expectCreated: true,
+		},
+		{
+			name:                    "add new condition to existing ingress with incorrect value",
+			routerName:              "foo",
+			routerCanonicalHostname: "router-foo.foo.local",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					RouterCanonicalHostname: "router1.not-foo.local",
+					RouterName:              "foo",
+				},
+				}},
+			},
+			condition: admittedTrueCondition,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "foo.foo.local",
+					RouterName:              "foo",
+					RouterCanonicalHostname: "router-foo.foo.local",
+					Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition},
+				},
+				}},
+			},
+			expectChanged: true,
+		},
+		{
+			name:                    "add new condition to existing ingress with existing condition",
+			routerName:              "foo",
+			routerCanonicalHostname: "router-foo.foo.local",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "route1.foo.local",
+					RouterName: "foo",
+					Conditions: []routev1.RouteIngressCondition{deprecatedTrueCondition},
+				},
+				}},
+			},
+			condition: admittedTrueCondition,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "foo.foo.local",
+					RouterName:              "foo",
+					RouterCanonicalHostname: "router-foo.foo.local",
+					Conditions: []routev1.RouteIngressCondition{
+						deprecatedTrueCondition,
+						admittedTrueCondition,
+					},
+				},
+				}},
+			},
+			expectChanged: true,
+		},
+		{
+			name:                    "add new condition, but another router's ingress exists",
+			routerName:              "foo",
+			routerCanonicalHostname: "router-foo.foo.local",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:       "foo.foo.local",
+					RouterName: "bar",
+					Conditions: []routev1.RouteIngressCondition{deprecatedTrueCondition},
+				},
+				}},
+			},
+			condition: admittedTrueCondition,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{
+					{
+						Host:       "foo.foo.local",
+						RouterName: "bar",
+						Conditions: []routev1.RouteIngressCondition{deprecatedTrueCondition},
+					},
+					{
+						Host:                    "foo.foo.local",
+						RouterCanonicalHostname: "router-foo.foo.local",
+						RouterName:              "foo",
+						Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition},
+					},
+				}},
+			},
+			expectCreated: true,
+			expectChanged: true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			routeOriginalIngress := findIngressForRoute(tc.route, tc.routerName).DeepCopy()
+			// Make the conditions nil because recordIngressCondition does this for original
+			if routeOriginalIngress != nil {
+				routeOriginalIngress.Conditions = nil
+			}
+			changed, created, _, latest, original := recordIngressCondition(tc.route, tc.routerName, tc.routerCanonicalHostname, tc.condition)
+
+			// Compare expected route, but ignore LastTransitionTime since that is generated
+			cmpOpts := []cmp.Option{
+				cmpopts.EquateEmpty(),
+				cmpopts.IgnoreFields(routev1.RouteIngressCondition{}, "LastTransitionTime"),
+			}
+			if diff := cmp.Diff(tc.expectedRoute, tc.route, cmpOpts...); len(diff) > 0 {
+				t.Errorf("mismatched routes (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(findIngressForRoute(tc.route, tc.routerName), latest, cmpOpts...); len(diff) > 0 {
+				t.Errorf("expected latest to match route ingress (-want +got):\n%s", diff)
+			}
+			if tc.expectCreated != created {
+				t.Errorf("expected created=%t, but got created=%t", tc.expectCreated, created)
+			}
+			if tc.expectChanged != changed {
+				t.Errorf("expected changed=%t, but got changed=%t", tc.expectChanged, changed)
+			}
+			if diff := cmp.Diff(routeOriginalIngress, original, cmpOpts...); len(diff) > 0 {
+				t.Errorf("expected original to match original route.Status (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func Test_removeIngressCondition(t *testing.T) {
+	admittedTrueCondition := routev1.RouteIngressCondition{
+		Type:    routev1.RouteAdmitted,
+		Status:  corev1.ConditionTrue,
+		Reason:  "Test",
+		Message: "test",
+	}
+	deprecatedTrueCondition := routev1.RouteIngressCondition{
+		Type:    routev1.RouteDeprecated,
+		Status:  corev1.ConditionTrue,
+		Reason:  "Test",
+		Message: "test",
+	}
+	testCases := []struct {
+		name          string
+		route         *routev1.Route
+		routerName    string
+		conditionType routev1.RouteIngressConditionType
+		expectedRoute *routev1.Route
+		expectChanged bool
+	}{
+		{
+			name:       "condition not found",
+			routerName: "foo",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "foo.foo.local",
+					RouterName:              "foo",
+					RouterCanonicalHostname: "router-foo.foo.local",
+					Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition}},
+				}},
+			},
+			conditionType: routev1.RouteDeprecated,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "foo.foo.local",
+					RouterName:              "foo",
+					RouterCanonicalHostname: "router-foo.foo.local",
+					Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition}},
+				}},
+			},
+		},
+		{
+			name:       "ingress not found",
+			routerName: "foo",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "bar.bar.local",
+					RouterName:              "bar",
+					RouterCanonicalHostname: "router-bar.bar.local",
+					Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition}},
+				}},
+			},
+			conditionType: routev1.RouteDeprecated,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "bar.bar.local",
+					RouterName:              "bar",
+					RouterCanonicalHostname: "router-bar.bar.local",
+					Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition}},
+				}},
+			},
+		},
+		{
+			name:       "remove condition found",
+			routerName: "foo",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "foo.foo.local",
+					RouterName:              "foo",
+					RouterCanonicalHostname: "router-foo.foo.local",
+					Conditions: []routev1.RouteIngressCondition{
+						admittedTrueCondition,
+						deprecatedTrueCondition,
+					}},
+				}},
+			},
+			conditionType: routev1.RouteDeprecated,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{{
+					Host:                    "foo.foo.local",
+					RouterName:              "foo",
+					RouterCanonicalHostname: "router-foo.foo.local",
+					Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition}},
+				}},
+			},
+			expectChanged: true,
+		},
+		{
+			name:       "remove condition found with other ingresses",
+			routerName: "foo",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{
+					{
+						Host:                    "bar.bar.local",
+						RouterName:              "bar",
+						RouterCanonicalHostname: "router-bar.foo.local",
+						Conditions: []routev1.RouteIngressCondition{
+							admittedTrueCondition,
+							deprecatedTrueCondition,
+						},
+					},
+					{
+						Host:                    "foo.foo.local",
+						RouterName:              "foo",
+						RouterCanonicalHostname: "router-foo.foo.local",
+						Conditions: []routev1.RouteIngressCondition{
+							admittedTrueCondition,
+							deprecatedTrueCondition,
+						},
+					},
+				}},
+			},
+			conditionType: routev1.RouteDeprecated,
+			expectedRoute: &routev1.Route{
+				Spec: routev1.RouteSpec{Host: "foo.foo.local"},
+				Status: routev1.RouteStatus{Ingress: []routev1.RouteIngress{
+					{
+						Host:                    "bar.bar.local",
+						RouterName:              "bar",
+						RouterCanonicalHostname: "router-bar.foo.local",
+						Conditions: []routev1.RouteIngressCondition{
+							admittedTrueCondition,
+							deprecatedTrueCondition,
+						},
+					},
+					{
+						Host:                    "foo.foo.local",
+						RouterName:              "foo",
+						RouterCanonicalHostname: "router-foo.foo.local",
+						Conditions:              []routev1.RouteIngressCondition{admittedTrueCondition},
+					},
+				}},
+			},
+			expectChanged: true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			routeOriginalIngress := findIngressForRoute(tc.route, tc.routerName).DeepCopy()
+			// Make the conditions nil because recordIngressCondition does this for original
+			if routeOriginalIngress != nil {
+				routeOriginalIngress.Conditions = nil
+			}
+			changed, _, latest, original := removeIngressCondition(tc.route, tc.routerName, tc.conditionType)
+
+			// Compare expected route, but ignore LastTransitionTime since that is generated
+			cmpOpts := []cmp.Option{
+				cmpopts.EquateEmpty(),
+				cmpopts.IgnoreFields(routev1.RouteIngressCondition{}, "LastTransitionTime"),
+			}
+			if diff := cmp.Diff(tc.expectedRoute, tc.route, cmpOpts...); len(diff) > 0 {
+				t.Errorf("mismatched routes (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(findIngressForRoute(tc.route, tc.routerName), latest, cmpOpts...); len(diff) > 0 {
+				t.Errorf("expected latest to match route ingress (-want +got):\n%s", diff)
+			}
+			if tc.expectChanged != changed {
+				t.Errorf("expected changed=%t, but got changed=%t", tc.expectChanged, changed)
+			}
+			if diff := cmp.Diff(routeOriginalIngress, original, cmpOpts...); len(diff) > 0 {
+				t.Errorf("expected original to match original route.Status (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
 
 func ingressChangeWithNewHost(route *routev1.Route, routerName, newHost string) *routev1.RouteIngress {

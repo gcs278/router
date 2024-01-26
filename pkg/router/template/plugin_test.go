@@ -17,27 +17,38 @@ import (
 )
 
 const (
-	testExpiredCAUnknownCertificate = `-----BEGIN CERTIFICATE-----
-MIIDIjCCAgqgAwIBAgIBBjANBgkqhkiG9w0BAQUFADCBoTELMAkGA1UEBhMCVVMx
-CzAJBgNVBAgMAlNDMRUwEwYDVQQHDAxEZWZhdWx0IENpdHkxHDAaBgNVBAoME0Rl
-ZmF1bHQgQ29tcGFueSBMdGQxEDAOBgNVBAsMB1Rlc3QgQ0ExGjAYBgNVBAMMEXd3
-dy5leGFtcGxlY2EuY29tMSIwIAYJKoZIhvcNAQkBFhNleGFtcGxlQGV4YW1wbGUu
-Y29tMB4XDTE2MDExMzE5NDA1N1oXDTI2MDExMDE5NDA1N1owfDEYMBYGA1UEAxMP
-d3d3LmV4YW1wbGUuY29tMQswCQYDVQQIEwJTQzELMAkGA1UEBhMCVVMxIjAgBgkq
-hkiG9w0BCQEWE2V4YW1wbGVAZXhhbXBsZS5jb20xEDAOBgNVBAoTB0V4YW1wbGUx
-EDAOBgNVBAsTB0V4YW1wbGUwgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAM0B
-u++oHV1wcphWRbMLUft8fD7nPG95xs7UeLPphFZuShIhhdAQMpvcsFeg+Bg9PWCu
-v3jZljmk06MLvuWLfwjYfo9q/V+qOZVfTVHHbaIO5RTXJMC2Nn+ACF0kHBmNcbth
-OOgF8L854a/P8tjm1iPR++vHnkex0NH7lyosVc/vAgMBAAGjDTALMAkGA1UdEwQC
-MAAwDQYJKoZIhvcNAQEFBQADggEBADjFm5AlNH3DNT1Uzx3m66fFjqqrHEs25geT
-yA3rvBuynflEHQO95M/8wCxYVyuAx4Z1i4YDC7tx0vmOn/2GXZHY9MAj1I8KCnwt
-Jik7E2r1/yY0MrkawljOAxisXs821kJ+Z/51Ud2t5uhGxS6hJypbGspMS7OtBbw7
-8oThK7cWtCXOldNF6ruqY1agWnhRdAq5qSMnuBXuicOP0Kbtx51a1ugE3SnvQenJ
-nZxdtYUXvEsHZC/6bAtTfNh+/SwgxQJuL2ZM+VG3X2JIKY8xTDui+il7uTh422lq
-wED8uwKl+bOj6xFDyw4gWoBxRobsbFaME8pkykP1+GnKDberyAM=
+	// openssl req -x509 -sha256 -newkey rsa:1024 -days 3650 -keyout exampleca.key -out exampleca.crt -addext "keyUsage=cRLSign, digitalSignature, keyCertSign" -addext "extendedKeyUsage=serverAuth, clientAuth" -nodes -subj '/C=US/ST=SC/L=Default City/O=Default Company Ltd/OU=Test CA/CN=www.exampleca.com/emailAddress=example@example.com'
+	// openssl req -new -key testCertPrivateKey.key -nodes -out testCAUnknownCertificate.csr -subj '/CN=www.example.com/ST=SC/C=US/emailAddress=example@example.com/O=Example/OU=Example'
+	// openssl x509 -req -days 3650 -sha256 -in testCAUnknownCertificate.csr -CA exampleca.crt -CAcreateserial -CAkey exampleca.key -extensions ext -extfile <(echo $'[ext]\nbasicConstraints = CA:FALSE') -out example.crt
+	//
+	// Signature Algorithm: sha256WithRSAEncryption
+	// Issuer: C = US, ST = SC, L = Default City, O = Default Company Ltd, OU = Test CA, CN = www.exampleca.com, emailAddress = example@example.com
+	// Validity
+	//    Not Before: Jan 10 19:00:04 2024 GMT
+	//    Not After : Jan  7 19:00:04 2034 GMT
+	// Subject: CN = www.example.com, ST = SC, C = US, emailAddress = example@example.com, O = Example, OU = Example
+	// Key = testCertPrivateKey
+	// CA = Unknown
+	testCAUnknownCertificate = `-----BEGIN CERTIFICATE-----
+MIIC9DCCAl2gAwIBAgIUTWv/Z/7lOkdCELulnNZOP4azjG4wDQYJKoZIhvcNAQEL
+BQAwgaExCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJTQzEVMBMGA1UEBwwMRGVmYXVs
+dCBDaXR5MRwwGgYDVQQKDBNEZWZhdWx0IENvbXBhbnkgTHRkMRAwDgYDVQQLDAdU
+ZXN0IENBMRowGAYDVQQDDBF3d3cuZXhhbXBsZWNhLmNvbTEiMCAGCSqGSIb3DQEJ
+ARYTZXhhbXBsZUBleGFtcGxlLmNvbTAeFw0yNDAxMTAxOTAwMDRaFw0zNDAxMDcx
+OTAwMDRaMHwxGDAWBgNVBAMMD3d3dy5leGFtcGxlLmNvbTELMAkGA1UECAwCU0Mx
+CzAJBgNVBAYTAlVTMSIwIAYJKoZIhvcNAQkBFhNleGFtcGxlQGV4YW1wbGUuY29t
+MRAwDgYDVQQKDAdFeGFtcGxlMRAwDgYDVQQLDAdFeGFtcGxlMIGfMA0GCSqGSIb3
+DQEBAQUAA4GNADCBiQKBgQDNAbvvqB1dcHKYVkWzC1H7fHw+5zxvecbO1Hiz6YRW
+bkoSIYXQEDKb3LBXoPgYPT1grr942ZY5pNOjC77li38I2H6Pav1fqjmVX01Rx22i
+DuUU1yTAtjZ/gAhdJBwZjXG7YTjoBfC/OeGvz/LY5tYj0fvrx55HsdDR+5cqLFXP
+7wIDAQABo00wSzAJBgNVHRMEAjAAMB0GA1UdDgQWBBSYTeaq+a2V/7QWJh/gH2tE
+GXln7jAfBgNVHSMEGDAWgBRQlTo+l7rGlVRX5myTzXIHBN587jANBgkqhkiG9w0B
+AQsFAAOBgQCvvO7Gp9zfrKa5LRrfPQuz82Q47UDSeZTmn1Hi6RJxpbgmSggsXV5W
+ibm7ToWdUrcOsmj0gwZO08jP5G5gy52kShogSy8Je7Qj7Jf4OOdG2pCMe1BEYdyS
+8W1kEoEBL8JhHt1ftjW2U3rPhxbtOLZ0gnzLf30T9GfgAB1nwadcwA==
 -----END CERTIFICATE-----`
 
-	testExpiredCertPrivateKey = `-----BEGIN RSA PRIVATE KEY-----
+	testCertPrivateKey = `-----BEGIN RSA PRIVATE KEY-----
 MIICWwIBAAKBgQDNAbvvqB1dcHKYVkWzC1H7fHw+5zxvecbO1Hiz6YRWbkoSIYXQ
 EDKb3LBXoPgYPT1grr942ZY5pNOjC77li38I2H6Pav1fqjmVX01Rx22iDuUU1yTA
 tjZ/gAhdJBwZjXG7YTjoBfC/OeGvz/LY5tYj0fvrx55HsdDR+5cqLFXP7wIDAQAB
@@ -52,6 +63,52 @@ pgfj+yGLmkUw8JwgGH6xCUbHO+WBUFSlPf+Y50fJeO+OrjqPXAVKeSV3ZCwWjKT4
 9viXJNJJ4WfF0bO/XwJAOMB1wQnEOSZ4v+laMwNtMq6hre5K8woqteXICoGcIWe8
 u3YLAbyW/lHhOCiZu2iAI8AbmXem9lW6Tr7p/97s0w==
 -----END RSA PRIVATE KEY-----`
+
+	// openssl req -newkey rsa:1024 -nodes -keyout testExpiredCert.key -out testExpiredCert.csr -subj '/CN=www.example.com/ST=SC/C=US/emailAddress=example@example.com/O=Example/OU=Example'
+	// faketime 'last year 5pm' /bin/bash -c 'openssl x509 -req -days 1 -sha256 -in testExpiredCert.csr -CA exampleca.crt -CAcreateserial -CAkey testCACertificate.key -extensions ext -extfile <(echo $"[ext]\nbasicConstraints = CA:FALSE") -out testExpiredCert.crt'
+	//
+	// Signature Algorithm: sha256WithRSAEncryption
+	// Issuer: C = US, ST = SC, L = Default City, O = Default Company Ltd, OU = Test CA, CN = www.exampleca.com, emailAddress = example@example.com
+	// Validity
+	//    Not Before: Jan 16 22:00:00 2023 GMT
+	//    Not After : Jan 17 22:00:00 2023 GMT
+	// Subject: CN = www.example.com, ST = SC, C = US, emailAddress = example@example.com, O = Example, OU = Example
+	// Key = testExpiredCertKey
+	// CA = testCACertificate
+	testExpiredCert = `-----BEGIN CERTIFICATE-----
+MIICoDCCAgkCFE1r/2f+5TpHQhC7pZzWTj+Gs4yGMA0GCSqGSIb3DQEBCwUAMIGh
+MQswCQYDVQQGEwJVUzELMAkGA1UECAwCU0MxFTATBgNVBAcMDERlZmF1bHQgQ2l0
+eTEcMBoGA1UECgwTRGVmYXVsdCBDb21wYW55IEx0ZDEQMA4GA1UECwwHVGVzdCBD
+QTEaMBgGA1UEAwwRd3d3LmV4YW1wbGVjYS5jb20xIjAgBgkqhkiG9w0BCQEWE2V4
+YW1wbGVAZXhhbXBsZS5jb20wHhcNMjMwMTE2MjIwMDAwWhcNMjMwMTE3MjIwMDAw
+WjB8MRgwFgYDVQQDDA93d3cuZXhhbXBsZS5jb20xCzAJBgNVBAgMAlNDMQswCQYD
+VQQGEwJVUzEiMCAGCSqGSIb3DQEJARYTZXhhbXBsZUBleGFtcGxlLmNvbTEQMA4G
+A1UECgwHRXhhbXBsZTEQMA4GA1UECwwHRXhhbXBsZTCBnzANBgkqhkiG9w0BAQEF
+AAOBjQAwgYkCgYEA9K4gDr8ZKZJDokTeK79guq/0rnTSJiZhZ4I9a6GvYkqqQBxT
+xND1E7RyvrkIIxq/BbzpmoAny+EbKiF+GuG0e6SVI9dYjs9eRsYTVki/gsbWKTPZ
+bNvZg+r5wI9CpwHuVmT6YOxTSxcXHAquuohACcgUWaptPbBaEjna8v3Ue4MCAwEA
+ATANBgkqhkiG9w0BAQsFAAOBgQBtfVNlfP0sp2zE9KvwVqV2bZVjd2jTqXyg2qmK
+CWrwe70nXXgvhG/DT2kHU0wlecBmrf3NTv77NQCtmQNih8Wenxz9EYk2K69IcFS6
+en17RQP5sdHRtiCRx0yc/InAQXYXoQiyETFA0/YRhh6ss7pgEdvFZTPz1cFFsFbv
+074olw==
+-----END CERTIFICATE-----`
+
+	testExpiredCertKey = `-----BEGIN PRIVATE KEY-----
+MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAPSuIA6/GSmSQ6JE
+3iu/YLqv9K500iYmYWeCPWuhr2JKqkAcU8TQ9RO0cr65CCMavwW86ZqAJ8vhGyoh
+fhrhtHuklSPXWI7PXkbGE1ZIv4LG1ikz2Wzb2YPq+cCPQqcB7lZk+mDsU0sXFxwK
+rrqIQAnIFFmqbT2wWhI52vL91HuDAgMBAAECgYAhcrhBK9CFxU/nm+B/PH89phYd
+zyx3OKHyI3TABO9T0X8qmnS9IA+QrQdOmT7Khbp9T1Dj5QcLsO8kuEVj6VzhkbVy
+PIvxEQiL/ngJJu8V7bT0NK8A+7kR8YnKU/K+iKBJ+0shM24IBy40NGddSQ48GBzc
+ArIhBPycR4eTi9PpYQJBAPvi9hINkSIGG2QHWhXXNzFN6lxD/frHzU7zqNJKfIEG
+aXCEeiih8Dqfl4SeuWNfwqxgp+HtsuHz7AuLr/XOMBMCQQD4rQlz2aV/HymNw9+n
+V5jpt2VmTtWyziwl52hMJ51c6DGpBTezSMmNn3Q4AkwrQw5SDVusCK4QY21MkwKV
+g1TRAkAOY8jq/xtrdi3aaREcbk8Y4fqhisDXstJn0EO0v8ydEmCzrN3NtHKk5rkh
+OnAc3Tuh3WO55HpzrhuuDSzgPgdBAkEAn1UHdHIkhtHppwq0l50Zvc4jKy0h4UIW
+qWaevgS34BpqDzjnmnjto09igKyAL0v0tgAXF6AsHxYFpwWepzuRsQJBAJzCLvnL
+336G+BzgA2fOMWJibkI6e0aTkur+AZ0aa1dCmLDHOYaq42eLCQFSwCWk3ZIe6+7/
++jCpmLpAmN/zKSo=
+-----END PRIVATE KEY-----`
 
 	testCertificate = `-----BEGIN CERTIFICATE-----
 MIICwjCCAiugAwIBAgIBATANBgkqhkiG9w0BAQsFADBjMQswCQYDVQQGEwJVUzEL
@@ -117,6 +174,54 @@ bGvtpjWA4r9WASIDPFsxk/cDEEEO6iPxgMOf5MdpQC2y2MU0rzF/Gg==
 -----END CERTIFICATE-----`
 
 	testDestinationCACertificate = testCACertificate
+
+	// openssl req -x509 -sha1 -newkey rsa:1024 -days 3650 -keyout exampleca.key -out exampleca.crt -addext "keyUsage=cRLSign, digitalSignature, keyCertSign" -addext "extendedKeyUsage=serverAuth, clientAuth" -nodes -subj '/C=US/ST=SC/L=Default City/O=Default Company Ltd/OU=Test CA/CN=www.exampleca.com/emailAddress=example@example.com'
+	// openssl req -newkey rsa:1024 -nodes -keyout testCertificateRsaSha1.key -out testCertificateRsaSha1.csr -subj '/CN=www.example.com/ST=SC/C=US/emailAddress=example@example.com/O=Example/OU=Example'
+	// openssl x509 -req -days 3650 -sha1 -in testCertificateRsaSha1.csr -CA exampleca.crt -CAcreateserial -CAkey exampleca.key -extensions ext -extfile <(echo $'[ext]\nbasicConstraints = CA:FALSE') -out testCertificateRsaSha1.crt
+	//
+	// Signature Algorithm: sha1WithRSAEncryption
+	// Issuer: C = US, ST = SC, L = Default City, O = Default Company Ltd, OU = Test CA, CN = www.exampleca.com, emailAddress = example@example.com
+	// Validity
+	//    Not Before: Jan 10 19:56:08 2024 GMT
+	//    Not After : Jan  7 19:56:08 2034 GMT
+	// Subject: CN = www.example.com, ST = SC, C = US, emailAddress = example@example.com, O = Example, OU = Example
+	// Key = testCertificateRsaSha1Key
+	testCertificateRsaSha1 = `-----BEGIN CERTIFICATE-----
+MIIC9DCCAl2gAwIBAgIUTWv/Z/7lOkdCELulnNZOP4azjHowDQYJKoZIhvcNAQEF
+BQAwgaExCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJTQzEVMBMGA1UEBwwMRGVmYXVs
+dCBDaXR5MRwwGgYDVQQKDBNEZWZhdWx0IENvbXBhbnkgTHRkMRAwDgYDVQQLDAdU
+ZXN0IENBMRowGAYDVQQDDBF3d3cuZXhhbXBsZWNhLmNvbTEiMCAGCSqGSIb3DQEJ
+ARYTZXhhbXBsZUBleGFtcGxlLmNvbTAeFw0yNDAxMTAxOTU2MDhaFw0zNDAxMDcx
+OTU2MDhaMHwxGDAWBgNVBAMMD3d3dy5leGFtcGxlLmNvbTELMAkGA1UECAwCU0Mx
+CzAJBgNVBAYTAlVTMSIwIAYJKoZIhvcNAQkBFhNleGFtcGxlQGV4YW1wbGUuY29t
+MRAwDgYDVQQKDAdFeGFtcGxlMRAwDgYDVQQLDAdFeGFtcGxlMIGfMA0GCSqGSIb3
+DQEBAQUAA4GNADCBiQKBgQC4hsxewdQOk5goI9bdkR1urJnbu7TeZdDtPz0Mi976
+1guAxNPQO98t0X/Bhs7toZz/zIG4vQZfXaV2IU1ry7pQ64I8bTPXQ/Kpt8zW3zng
+dPeIJqVujKPybIL/teHJ1Bw4c4x1ZMpAGoZ6s750tQy1zP7WRqStJv2G9l3OQLFu
+AQIDAQABo00wSzAJBgNVHRMEAjAAMB0GA1UdDgQWBBS6uwvwYLV5u4TX9ZFMBpQe
+hW4YKjAfBgNVHSMEGDAWgBRQlTo+l7rGlVRX5myTzXIHBN587jANBgkqhkiG9w0B
+AQUFAAOBgQB+1bS0s6SpuCuMFFMpeBcE7WX//AGU/ZcRfO60ithV6NQ9OnN3djfS
+H+ZeW3QEaQVMM0PIOuMO22/9AN6UVs8IxSuSkrfBOQ+PY/3169b6rpGl44/ZTx6B
+O+c5wkkhnmy4+T6KnjQE5aO1VKBp3Ocl8PyIBqLLV52pZWUuytGlqA==
+-----END CERTIFICATE-----
+`
+	testCertificateRsaSha1Key = `
+-----BEGIN PRIVATE KEY-----
+MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBALiGzF7B1A6TmCgj
+1t2RHW6smdu7tN5l0O0/PQyL3vrWC4DE09A73y3Rf8GGzu2hnP/Mgbi9Bl9dpXYh
+TWvLulDrgjxtM9dD8qm3zNbfOeB094gmpW6Mo/Jsgv+14cnUHDhzjHVkykAahnqz
+vnS1DLXM/tZGpK0m/Yb2Xc5AsW4BAgMBAAECgYAWaNBzBYkSSBxna4rRl6kCYtXA
+mLgrdiP8W/y3BFmNDueQuNacaFj/QH0KbKu+sizV5+ktHU+jz0Sj5wF3AOPccRtJ
+QcGxr66f1uVPeBQfO27ac8b5UYwIFCu4gJ9IQp86INARuO4U5UR2o7sJ8rUpmf2M
+p2JUQwKXjO0qDyDcQQJBAODWqTkdr0Av2vAOZe6SOfmr+u/2shAWPTg8uc1Y08Ng
+1Fh0o7vqkOQ6Amtw4o5lE0RE0LlPSnxhpl28sT0gwUkCQQDSGdtIk77rh+WqNjYZ
+GWhKBA2H8w0jo37Wz1aGyv/Yt6LC/LgOdOcadu4xSIgG+Al9JHdzLx7iWvNdIjD6
+l/75AkEA1szdwL5WVnkhrmPjCAhVMO0YALbrqKjGdfq1+7OYJDlWxOcyIe5X3GJ7
+O1AOccGopXkk+1UAMVJNUZJata6cWQJBAIEvhubsecNHL09mwALU3YxNS6ihKR4V
+xML+gBynq4Ms/vZYADBbb1KVeEZza7ilQOhiyNPZUGssM2G7yVP8q7kCQHFCAgmO
+redbrtiWNunEy1hVHOJD6ALriPz2i1W51NMbrPV2kOy9GpV/p3oby3GmXHs+Zlo6
+bBbOLhI7o+VlGaM=
+-----END PRIVATE KEY-----`
 )
 
 // TestRouter provides an implementation of the plugin's router interface suitable for unit testing.
@@ -463,23 +568,45 @@ func TestHandleTCPEndpoints(t *testing.T) {
 	}
 }
 
-type rejection struct {
+type status struct {
 	route   *routev1.Route
 	reason  string
 	message string
 }
 
-type fakeRejections struct {
-	rejections []rejection
+type fakeStatusRecorder struct {
+	rejections []status
+	deprecated []status
 }
 
-func (r *fakeRejections) RecordRouteRejection(route *routev1.Route, reason, message string) {
-	r.rejections = append(r.rejections, rejection{route: route, reason: reason, message: message})
+func (r *fakeStatusRecorder) RecordRouteRejection(route *routev1.Route, reason, message string) {
+	r.rejections = append(r.rejections, status{route: route, reason: reason, message: message})
+}
+func (r *fakeStatusRecorder) RecordRouteDeprecated(route *routev1.Route, reason, message string) {
+	r.deprecated = append(r.deprecated, status{route: route, reason: reason, message: message})
+}
+func (r *fakeStatusRecorder) RecordRouteNotDeprecated(route *routev1.Route) {
+	var deprecated []status
+	for _, rejection := range r.deprecated {
+		if rejection.route.UID != route.UID {
+			deprecated = append(deprecated, rejection)
+		}
+	}
+	r.deprecated = deprecated
+}
+
+func (r *fakeStatusRecorder) isDeprecated(route *routev1.Route) bool {
+	for _, r := range r.deprecated {
+		if r.route.UID == route.UID {
+			return true
+		}
+	}
+	return false
 }
 
 // TestHandleRoute test route watch events
 func TestHandleRoute(t *testing.T) {
-	rejections := &fakeRejections{}
+	rejections := &fakeStatusRecorder{}
 	router := newTestRouter(make(map[ServiceAliasConfigKey]ServiceAliasConfig))
 	templatePlugin := newDefaultTemplatePlugin(router, true, nil)
 	// TODO: move tests that rely on unique hosts to pkg/router/controller and remove them from
@@ -530,7 +657,7 @@ func TestHandleRoute(t *testing.T) {
 	}
 
 	if len(rejections.rejections) > 0 {
-		t.Fatalf("did not expect a recorded rejection: %#v", rejections)
+		t.Fatalf("did not expect a recorded status: %#v", rejections)
 	}
 
 	// attempt to add a second route with a newer time, verify it is ignored
@@ -563,7 +690,7 @@ func TestHandleRoute(t *testing.T) {
 		rejections.rejections[0].route.Name != "dupe" ||
 		rejections.rejections[0].reason != "HostAlreadyClaimed" ||
 		rejections.rejections[0].message != "route test already exposes www.example.com and is older" {
-		t.Fatalf("did not record rejection: %#v", rejections)
+		t.Fatalf("did not record status: %#v", rejections)
 	}
 	rejections.rejections = nil
 
@@ -582,7 +709,7 @@ func TestHandleRoute(t *testing.T) {
 		t.Fatalf("unexpected claimed routes: %#v", r)
 	}
 	if len(rejections.rejections) != 0 {
-		t.Fatalf("did not record rejection: %#v", rejections)
+		t.Fatalf("did not record status: %#v", rejections)
 	}
 	rejections.rejections = nil
 
@@ -602,7 +729,7 @@ func TestHandleRoute(t *testing.T) {
 		rejections.rejections[0].route.Name != "test" ||
 		rejections.rejections[0].reason != "HostAlreadyClaimed" ||
 		rejections.rejections[0].message != "replaced by older route dupe" {
-		t.Fatalf("did not record rejection: %#v", rejections)
+		t.Fatalf("did not record status: %#v", rejections)
 	}
 	rejections.rejections = nil
 
@@ -632,7 +759,7 @@ func TestHandleRoute(t *testing.T) {
 		t.Fatalf("did not clear claimed route: %#v", plugin)
 	}
 	if len(rejections.rejections) != 0 {
-		t.Fatalf("unexpected rejection: %#v", rejections)
+		t.Fatalf("unexpected status: %#v", rejections)
 	}
 
 	plugin.HandleRoute(watch.Deleted, fooDupe3)
@@ -641,7 +768,7 @@ func TestHandleRoute(t *testing.T) {
 		t.Fatalf("did not clear claimed route: %#v", plugin)
 	}
 	if len(rejections.rejections) != 0 {
-		t.Fatalf("unexpected rejection: %#v", rejections)
+		t.Fatalf("unexpected status: %#v", rejections)
 	}
 
 	//delete
@@ -663,7 +790,7 @@ func TestHandleRoute(t *testing.T) {
 		t.Errorf("did not clear claimed route: %#v", plugin)
 	}
 	if len(rejections.rejections) != 0 {
-		t.Fatalf("unexpected rejection: %#v", rejections)
+		t.Fatalf("unexpected status: %#v", rejections)
 	}
 }
 
@@ -695,7 +822,7 @@ func (p *fakePlugin) Commit() error {
 
 // TestHandleRouteExtendedValidation test route watch events with extended route configuration validation.
 func TestHandleRouteExtendedValidation(t *testing.T) {
-	rejections := &fakeRejections{}
+	rejections := &fakeStatusRecorder{}
 	fake := &fakePlugin{}
 	plugin := controller.NewExtendedValidator(fake, rejections)
 
@@ -723,7 +850,7 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 	}
 
 	if len(rejections.rejections) > 0 {
-		t.Fatalf("did not expect a recorded rejection: %#v", rejections)
+		t.Fatalf("did not expect a recorded status: %#v", rejections)
 	}
 
 	tests := []struct {
@@ -881,7 +1008,22 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 					TLS: &routev1.TLSConfig{
 						Termination:   routev1.TLSTerminationEdge,
 						Certificate:   testCertificate,
-						Key:           testExpiredCertPrivateKey,
+						Key:           testCertPrivateKey,
+						CACertificate: testCACertificate,
+					},
+				},
+			},
+			errorExpected: true,
+		},
+		{
+			name: "Edge termination unknown CA",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{
+					Host: "www.edge.unknownca.test",
+					TLS: &routev1.TLSConfig{
+						Termination:   routev1.TLSTerminationEdge,
+						Certificate:   testCAUnknownCertificate,
+						Key:           testCertPrivateKey,
 						CACertificate: testCACertificate,
 					},
 				},
@@ -895,13 +1037,12 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 					Host: "www.edge.expiredcert.test",
 					TLS: &routev1.TLSConfig{
 						Termination:   routev1.TLSTerminationEdge,
-						Certificate:   testExpiredCAUnknownCertificate,
-						Key:           testExpiredCertPrivateKey,
+						Certificate:   testExpiredCert,
+						Key:           testExpiredCertKey,
 						CACertificate: testCACertificate,
 					},
 				},
 			},
-			errorExpected: true,
 		},
 		{
 			name: "Edge termination expired cert key mismatch",
@@ -910,7 +1051,7 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 					Host: "www.edge.expiredcertkeymismatch.test",
 					TLS: &routev1.TLSConfig{
 						Termination:   routev1.TLSTerminationEdge,
-						Certificate:   testExpiredCAUnknownCertificate,
+						Certificate:   testCAUnknownCertificate,
 						Key:           testPrivateKey,
 						CACertificate: testCACertificate,
 					},
@@ -1012,17 +1153,142 @@ func TestHandleRouteExtendedValidation(t *testing.T) {
 		},
 	}
 
+	uidCount := 0
+	nextUID := func() types.UID {
+		uidCount++
+		return types.UID(fmt.Sprintf("%03d", uidCount))
+	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.route.UID = nextUID()
 			err := plugin.HandleRoute(watch.Added, tc.route)
-			if tc.errorExpected {
-				if err == nil {
-					t.Fatalf("test case %s: expected an error, got none", tc.name)
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("test case %s: expected no errors, got %v", tc.name, err)
-				}
+			if tc.errorExpected && err == nil {
+				t.Fatal("expected an error, got none")
+			} else if !tc.errorExpected && err != nil {
+				t.Fatalf("expected no errors, got %v", err)
+			}
+		})
+	}
+}
+
+// TestHandleRouteDeprecationValidation test route watch events with route deprecation validation plugin.
+func TestHandleRouteDeprecationValidation(t *testing.T) {
+	rejections := &fakeStatusRecorder{}
+	fake := &fakePlugin{}
+	plugin := controller.NewDeprecationValidation(fake, rejections)
+
+	original := metav1.Time{Time: time.Now()}
+
+	//add
+	route := &routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: original,
+			Namespace:         "foo",
+			Name:              "test",
+		},
+		Spec: routev1.RouteSpec{
+			Host: "www.example.com",
+			To: routev1.RouteTargetReference{
+				Name:   "TestService",
+				Weight: new(int32),
+			},
+		},
+	}
+
+	plugin.HandleRoute(watch.Added, route)
+	if fake.Route != route {
+		t.Fatalf("unexpected route: %#v", fake.Route)
+	}
+
+	if len(rejections.rejections) > 0 {
+		t.Fatalf("did not expect a recorded status: %#v", rejections)
+	}
+
+	tests := []struct {
+		name               string
+		route              *routev1.Route
+		deprecatedExpected bool
+	}{
+		{
+			name: "route with no cert should not be deprecated",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{
+					Host: "www.normal.test",
+				},
+			},
+		},
+		{
+			name: "route with SHA256 cert should not be deprecated",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{
+					Host: "www.example.com",
+					TLS: &routev1.TLSConfig{
+						Termination:              routev1.TLSTerminationReencrypt,
+						Certificate:              testCertificate,
+						Key:                      testPrivateKey,
+						CACertificate:            testCACertificate,
+						DestinationCACertificate: testDestinationCACertificate,
+					},
+				},
+			},
+		},
+		{
+			name: "route with invalid certs should not be deprecated",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{
+					Host: "www.reencypt.badconfig.test",
+					TLS: &routev1.TLSConfig{
+						Termination:              routev1.TLSTerminationReencrypt,
+						Certificate:              "def",
+						Key:                      "ghi",
+						CACertificate:            "jkl",
+						DestinationCACertificate: "abc",
+					},
+				},
+			},
+		},
+		{
+			name: "route with expired cert should not be deprecated",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{
+					Host: "www.edge.expiredcert.test",
+					TLS: &routev1.TLSConfig{
+						Termination:   routev1.TLSTerminationEdge,
+						Certificate:   testExpiredCert,
+						Key:           testExpiredCertKey,
+						CACertificate: testCACertificate,
+					},
+				},
+			},
+		},
+		{
+			name: "SHA1 certificate should be deprecated",
+			route: &routev1.Route{
+				Spec: routev1.RouteSpec{
+					Host: "www.reencrypt.sha1.test",
+					TLS: &routev1.TLSConfig{
+						Termination: routev1.TLSTerminationReencrypt,
+						Certificate: testCertificateRsaSha1,
+						Key:         testCertificateRsaSha1Key,
+					},
+				},
+			},
+			deprecatedExpected: true,
+		},
+	}
+
+	uidCount := 0
+	nextUID := func() types.UID {
+		uidCount++
+		return types.UID(fmt.Sprintf("%03d", uidCount))
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.route.UID = nextUID()
+			plugin.HandleRoute(watch.Added, tc.route)
+			deprecated := rejections.isDeprecated(tc.route)
+			if tc.deprecatedExpected != deprecated {
+				t.Fatalf("expected to be deprecated=%t, got deprecated=%t", tc.deprecatedExpected, deprecated)
 			}
 		})
 	}

@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -20,18 +22,32 @@ import (
 	"github.com/openshift/router/pkg/router/writerlease"
 )
 
-// RejectionRecorder is an object capable of recording why a route was rejected
-type RejectionRecorder interface {
+const (
+	keySeparator = "_"
+)
+
+// RouteStatusRecorder is an object capable of recording why a route status condition changed.
+type RouteStatusRecorder interface {
 	RecordRouteRejection(route *routev1.Route, reason, message string)
+	RecordRouteDeprecated(route *routev1.Route, reason, message string)
+	RecordRouteNotDeprecated(route *routev1.Route)
 }
 
-// LogRejections writes rejection messages to the log.
+// LogRejections writes route status change messages to the log.
 var LogRejections = logRecorder{}
 
 type logRecorder struct{}
 
 func (logRecorder) RecordRouteRejection(route *routev1.Route, reason, message string) {
 	log.V(3).Info("rejected route", "name", route.Name, "namespace", route.Namespace, "reason", reason, "message", message)
+}
+
+func (logRecorder) RecordRouteDeprecated(route *routev1.Route, reason, message string) {
+	log.V(3).Info("route deprecated", "name", route.Name, "namespace", route.Namespace, "reason", reason, "message", message)
+}
+
+func (logRecorder) RecordRouteNotDeprecated(route *routev1.Route) {
+	log.V(3).Info("route not deprecated", "name", route.Name, "namespace", route.Namespace)
 }
 
 // StatusAdmitter ensures routes added to the plugin have status set.
@@ -112,9 +128,26 @@ func (a *StatusAdmitter) RecordRouteRejection(route *routev1.Route, reason, mess
 	})
 }
 
+// RecordRouteDeprecated attempts to update the route status with a reason for a route being deprecated.
+func (a *StatusAdmitter) RecordRouteDeprecated(route *routev1.Route, reason, message string) {
+	performIngressConditionUpdate("deprecated", a.lease, a.tracker, a.client, a.lister, route, a.routerName, a.routerCanonicalHostname, routev1.RouteIngressCondition{
+		Type:    routev1.RouteDeprecated,
+		Status:  corev1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// RecordRouteNotDeprecated clears the deprecated status back to an unset state.
+func (a *StatusAdmitter) RecordRouteNotDeprecated(route *routev1.Route) {
+	log.V(4).Info("RecordRouteNotDeprecated")
+	performIngressConditionRemoval("not-deprecated", a.lease, a.tracker, a.client, a.lister, route, a.routerName, routev1.RouteDeprecated)
+}
+
 // performIngressConditionUpdate updates the route to the appropriate status for the provided condition.
 func performIngressConditionUpdate(action string, lease writerlease.Lease, tracker ContentionTracker, oc client.RoutesGetter, lister routelisters.RouteLister, route *routev1.Route, routerName, hostName string, condition routev1.RouteIngressCondition) {
-	key := string(route.UID)
+	// Key the lease off of the route UID and the condition type, as different conditions will require separate updates.
+	key := leaseKey(route.UID, condition.Type)
 	routeNamespace, routeName := route.Namespace, route.Name
 
 	lease.Try(key, func() (writerlease.WorkResult, bool) {
@@ -122,7 +155,7 @@ func performIngressConditionUpdate(action string, lease writerlease.Lease, track
 		if err != nil {
 			return writerlease.None, false
 		}
-		if string(route.UID) != key {
+		if string(route.UID) != getUIDFromLeaseKey(key) {
 			log.V(4).Info("skipped update due to route UID changing (likely delete and recreate)", "action", action, "namespace", route.Namespace, "name", route.Name)
 			return writerlease.None, false
 		}
@@ -146,30 +179,87 @@ func performIngressConditionUpdate(action string, lease writerlease.Lease, track
 			return writerlease.Release, false
 		}
 
-		switch _, err := oc.Routes(route.Namespace).UpdateStatus(context.TODO(), route, metav1.UpdateOptions{}); {
-		case err == nil:
-			log.V(4).Info("updated route status", "action", action, "namespace", route.Namespace, "name", route.Name)
-			tracker.Clear(key, latest)
-			return writerlease.Extend, false
-		case errors.IsNotFound(err):
-			// route was deleted
-			log.V(4).Info("route was deleted before we could update status", "action", action, "namespace", route.Namespace, "name", route.Name)
-			return writerlease.Release, false
-		case errors.IsConflict(err):
-			// just follow the normal process, and retry when we receive the update notification due to
-			// the other entity updating the route.
-			log.V(4).Info("updating route status failed due to write conflict", "action", action, "namespace", route.Namespace, "name", route.Name)
-			return writerlease.Release, true
-		default:
-			utilruntime.HandleError(fmt.Errorf("Unable to write router status for %s/%s: %v", route.Namespace, route.Name, err))
-			return writerlease.Release, true
-		}
+		return handleRouteStatusUpdate(key, action, oc, route, latest, tracker)
 	})
 }
 
+// performIngressConditionRemoval removes the provided condition type from the route.
+func performIngressConditionRemoval(action string, lease writerlease.Lease, tracker ContentionTracker, oc client.RoutesGetter, lister routelisters.RouteLister, route *routev1.Route, routerName string, condType routev1.RouteIngressConditionType) {
+	// Key the lease off of the route UID and the condition type, as different conditions will require separate updates.
+	key := leaseKey(route.UID, condType)
+	routeNamespace, routeName := route.Namespace, route.Name
+
+	lease.Try(key, func() (writerlease.WorkResult, bool) {
+		route, err := lister.Routes(routeNamespace).Get(routeName)
+		if err != nil {
+			return writerlease.None, false
+		}
+		if string(route.UID) != getUIDFromLeaseKey(key) {
+			log.V(4).Info("skipped update due to route UID changing (likely delete and recreate)", "action", action, "namespace", route.Namespace, "name", route.Name)
+			return writerlease.None, false
+		}
+
+		route = route.DeepCopy()
+		changed, now, latest, original := removeIngressCondition(route, routerName, condType)
+		if !changed {
+			log.V(4).Info("no changes to route needed", "action", action, "namespace", route.Namespace, "name", route.Name)
+			// if the most recent change was to our ingress status, consider the current lease extended
+			if findMostRecentIngress(route) == routerName {
+				lease.Extend(key)
+			}
+			return writerlease.None, false
+		}
+
+		// If the tracker determines that another process is attempting to update the ingress to an inconsistent
+		// value, skip updating altogether and rely on the next resync to resolve conflicts. This prevents routers
+		// with different configurations from endlessly updating the route status.
+		if tracker.IsChangeContended(key, now, latest) {
+			log.V(4).Info("skipped update due to another process altering the route with a different ingress status value", "action", action, "key", key, "original", original)
+			return writerlease.Release, false
+		}
+
+		return handleRouteStatusUpdate(key, action, oc, route, latest, tracker)
+	})
+}
+
+// handleRouteStatusUpdate manages the update of route status in conjunction with a writerlease and a tracker. It
+// attempts to update the route status and, depending on the outcome, clears the tracker if necessary. It returns the
+// writerlease's WorkResult and a boolean flag indicating whether the writerlease should retry.
+func handleRouteStatusUpdate(key, action string, oc client.RoutesGetter, route *routev1.Route, latest *routev1.RouteIngress, tracker ContentionTracker) (workResult writerlease.WorkResult, retry bool) {
+	switch _, err := oc.Routes(route.Namespace).UpdateStatus(context.TODO(), route, metav1.UpdateOptions{}); {
+	case err == nil:
+		log.V(4).Info("updated route status", "action", action, "namespace", route.Namespace, "name", route.Name)
+		tracker.Clear(key, latest)
+		return writerlease.Extend, false
+	case errors.IsNotFound(err):
+		// route was deleted
+		log.V(4).Info("route was deleted before we could update status", "action", action, "namespace", route.Namespace, "name", route.Name)
+		return writerlease.Release, false
+	case errors.IsConflict(err):
+		// just follow the normal process, and retry when we receive the update notification due to
+		// the other entity updating the route.
+		log.V(4).Info("updating route status failed due to write conflict", "action", action, "namespace", route.Namespace, "name", route.Name)
+		return writerlease.Release, true
+	default:
+		utilruntime.HandleError(fmt.Errorf("Unable to write router status for %s/%s: %v", route.Namespace, route.Name, err))
+		return writerlease.Release, true
+	}
+}
+
+// leaseKey creates a unique key for the writer lease logic given a route UID and a condition type.
+func leaseKey(uid types.UID, conditionType routev1.RouteIngressConditionType) string {
+	key := string(uid) + keySeparator + string(conditionType)
+	return key
+}
+
+// getUIDFromLeaseKey extracts the route UID from a given lease key.
+func getUIDFromLeaseKey(key string) string {
+	return strings.Split(key, keySeparator)[0]
+}
+
 // recordIngressCondition updates the matching ingress on the route (or adds a new one) with the specified
-// condition, returning whether the route was updated or created, the time assigned to the condition, and
-// a pointer to the current ingress record.
+// condition. It returns whether the route was updated or created, the time assigned to the condition, and
+// a pointer to the latest and original ingress records.
 func recordIngressCondition(route *routev1.Route, name, hostName string, condition routev1.RouteIngressCondition) (changed, created bool, at time.Time, latest, original *routev1.RouteIngress) {
 	for i := range route.Status.Ingress {
 		existing := &route.Status.Ingress[i]
@@ -188,6 +278,9 @@ func recordIngressCondition(route *routev1.Route, name, hostName string, conditi
 			if *existingCondition != condition {
 				changed = true
 			}
+		} else {
+			// If the condition we want doesn't exist, then consider it changed.
+			changed = true
 		}
 		if !changed {
 			return false, false, time.Time{}, existing, existing
@@ -201,13 +294,15 @@ func recordIngressCondition(route *routev1.Route, name, hostName string, conditi
 		existing.Host = route.Spec.Host
 		existing.WildcardPolicy = route.Spec.WildcardPolicy
 		existing.RouterCanonicalHostname = hostName
+
+		now := nowFn()
+		// Add or update the condition
 		if existingCondition == nil {
 			existing.Conditions = append(existing.Conditions, condition)
 			existingCondition = &existing.Conditions[len(existing.Conditions)-1]
 		} else {
 			*existingCondition = condition
 		}
-		now := nowFn()
 		existingCondition.LastTransitionTime = &now
 
 		return true, false, now.Time, existing, &original
@@ -230,14 +325,36 @@ func recordIngressCondition(route *routev1.Route, name, hostName string, conditi
 	return true, true, now.Time, ingress, nil
 }
 
-// findMostRecentIngress returns the name of the ingress status with the most recent Admitted condition transition time,
+// removeIngressCondition removes a matching status condition if it is found.
+// It returns whether the route was changed, the time it removed the condition, and
+// a pointer to the latest and original ingress records.
+func removeIngressCondition(route *routev1.Route, name string, condType routev1.RouteIngressConditionType) (changed bool, at time.Time, latest, original *routev1.RouteIngress) {
+	for i := range route.Status.Ingress {
+		existing := &route.Status.Ingress[i]
+		if existing.RouterName != name {
+			continue
+		}
+
+		// preserve a copy of the original ingress without conditions
+		original := *existing
+		original.Conditions = nil
+
+		now := nowFn()
+		changed = removeConditionByType(existing, condType)
+		return changed, now.Time, existing, &original
+	}
+
+	return false, time.Time{}, nil, nil
+}
+
+// findMostRecentIngress returns the name of the ingress status with the most recent condition transition time,
 // or an empty string if no such ingress exists.
 func findMostRecentIngress(route *routev1.Route) string {
 	var newest string
 	var recent time.Time
 	for i := range route.Status.Ingress {
-		if condition := findCondition(&route.Status.Ingress[i], routev1.RouteAdmitted); condition != nil && condition.LastTransitionTime != nil {
-			if condition.LastTransitionTime.Time.After(recent) {
+		for _, condition := range route.Status.Ingress[i].Conditions {
+			if condition.LastTransitionTime != nil && condition.LastTransitionTime.Time.After(recent) {
 				recent = condition.LastTransitionTime.Time
 				newest = route.Status.Ingress[i].RouterName
 			}
@@ -255,4 +372,29 @@ func findCondition(ingress *routev1.RouteIngress, t routev1.RouteIngressConditio
 		return &ingress.Conditions[i]
 	}
 	return nil
+}
+
+// removeConditionByType removes a condition from the RouteIngress if it matches typeToRemove and returns a boolean on
+// whether it removed it.
+func removeConditionByType(ingress *routev1.RouteIngress, typeToRemove routev1.RouteIngressConditionType) bool {
+	var updatedConditions []routev1.RouteIngressCondition
+	removed := false
+
+	for _, condition := range ingress.Conditions {
+		// Check if the condition type matches the one to remove.
+		if condition.Type != typeToRemove {
+			// Add the condition to the updated slice.
+			updatedConditions = append(updatedConditions, condition)
+		} else {
+			// Set removed to true since a condition was removed.
+			removed = true
+		}
+	}
+
+	// Update the conditions slice if any condition was removed.
+	if removed {
+		ingress.Conditions = updatedConditions
+	}
+
+	return removed
 }
