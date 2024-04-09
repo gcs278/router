@@ -151,8 +151,10 @@ func performIngressConditionUpdate(action string, lease writerlease.Lease, track
 	workKey := createWorkKey(route.UID, condition.Type)
 	routeNamespace, routeName := route.Namespace, route.Name
 	oldRouteUID := route.UID
+	log.V(4).Info("performIngressConditionUpdate", "workkey", workKey)
 
 	lease.Try(workKey, func() (writerlease.WorkResult, bool) {
+		log.V(4).Info("lease try in performIngressConditionUpdate")
 		route, err := lister.Routes(routeNamespace).Get(routeName)
 		if err != nil {
 			return writerlease.None, false
@@ -191,8 +193,10 @@ func performIngressConditionRemoval(action string, lease writerlease.Lease, trac
 	workKey := createWorkKey(route.UID, condType)
 	routeNamespace, routeName := route.Namespace, route.Name
 	oldRouteUID := route.UID
+	log.V(4).Info("performIngressConditionRemoval", "workkey", workKey)
 
 	lease.Try(workKey, func() (writerlease.WorkResult, bool) {
+		log.V(4).Info("lease try in performIngressConditionRemoval")
 		route, err := lister.Routes(routeNamespace).Get(routeName)
 		if err != nil {
 			return writerlease.None, false
@@ -212,6 +216,7 @@ func performIngressConditionRemoval(action string, lease writerlease.Lease, trac
 			}
 			return writerlease.None, false
 		}
+		log.Info("attempting to change something")
 
 		// If the tracker determines that another process is attempting to update the ingress to an inconsistent
 		// value, skip updating altogether and rely on the next resync to resolve conflicts. This prevents routers

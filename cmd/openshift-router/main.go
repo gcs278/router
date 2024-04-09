@@ -47,8 +47,9 @@ func CommandFor(basename string) *cobra.Command {
 	case "openshift-router", "openshift-haproxy-router":
 		cmd = router.NewCommandTemplateRouter(basename)
 	default:
-		fmt.Printf("unknown command name: %s\n", basename)
-		os.Exit(1)
+		cmd = router.NewCommandTemplateRouter(basename)
+		//fmt.Printf("unknown command name: %s\n", basename)
+		//os.Exit(1)
 	}
 
 	return cmd

@@ -2,6 +2,7 @@ package controller
 
 import (
 	kapi "k8s.io/api/core/v1"
+	"os"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
@@ -48,8 +49,13 @@ func (p *UpgradeValidation) HandleRoute(eventType watch.EventType, route *routev
 	// and set UnservableInFutureVersions condition if needed.
 	routeName := routeNameKey(route)
 	if err := routeapihelpers.UpgradeRouteValidation(route).ToAggregate(); err != nil {
-		log.Error(err, "route failed upgrade validation", "route", routeName)
-		p.recorder.RecordRouteUnservableInFutureVersions(route, "UpgradeRouteValidationFailed", err.Error())
+		if os.Getenv("DEBUG_UPGRADE_STATUS") == "clear" {
+			log.Error(err, "route clearing unservable...", "route", routeName)
+			p.recorder.RecordRouteUnservableInFutureVersionsClear(route)
+		} else {
+			log.Error(err, "route failed upgrade validation", "route", routeName)
+			p.recorder.RecordRouteUnservableInFutureVersions(route, "UpgradeRouteValidationFailed", err.Error())
+		}
 	} else {
 		p.recorder.RecordRouteUnservableInFutureVersionsClear(route)
 	}
