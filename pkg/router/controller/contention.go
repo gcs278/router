@@ -152,7 +152,7 @@ func (t *SimpleContentionTracker) flush() {
 	if t.contentions > 0 && len(t.message) > 0 {
 		log.V(0).Info(t.message)
 	}
-	log.V(5).Info("flushed contention tracker", "expires", t.expires*2, "removed", removed, "total", removed+len(t.ids), "contentions", t.contentions)
+	log.V(5).Info("flushed contention tracker", "expires", t.expires*2, "removed", removed, "total", removed+len(t.ids), "contentions", t.contentions, "flush contentions", contentions)
 	t.contentions = contentions
 }
 
@@ -248,8 +248,17 @@ func (t *SimpleContentionTracker) Clear(id string, current *routev1.RouteIngress
 func ingressEqual(a, b *routev1.RouteIngress) bool {
 	// In addition to the RouteIngress' string fields, compare the available admission condition to determine
 	// if the given ingress' are equal. See https://bugzilla.redhat.com/show_bug.cgi?id=1908389.
-	return a.Host == b.Host && a.RouterCanonicalHostname == b.RouterCanonicalHostname && a.WildcardPolicy == b.WildcardPolicy && a.RouterName == b.RouterName &&
-		cmp.Equal(findCondition(a, routev1.RouteAdmitted), findCondition(b, routev1.RouteAdmitted), cmpopts.IgnoreFields(routev1.RouteIngressCondition{}, "LastTransitionTime"))
+	if len(a.Conditions) != len(b.Conditions) {
+		return false
+	}
+	for j := range a.Conditions {
+		condition := &a.Conditions[j]
+		if cmp.Equal(condition, findCondition(b, condition.Type), cmpopts.IgnoreFields(routev1.RouteIngressCondition{}, "LastTransitionTime")) == false {
+			return false
+		}
+	}
+
+	return a.Host == b.Host && a.RouterCanonicalHostname == b.RouterCanonicalHostname && a.WildcardPolicy == b.WildcardPolicy && a.RouterName == b.RouterName
 }
 
 func ingressConditionTouched(ingress *routev1.RouteIngress) *metav1.Time {
