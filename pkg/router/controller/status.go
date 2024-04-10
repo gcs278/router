@@ -211,9 +211,9 @@ func performIngressConditionRemoval(action string, lease writerlease.Lease, trac
 		if !changed {
 			log.V(4).Info("no changes to route needed", "action", action, "namespace", route.Namespace, "name", route.Name)
 			// if the most recent change was to our ingress status, consider the current lease extended
-			if findMostRecentIngress(route) == routerName {
-				lease.Extend(workKey)
-			}
+			//if findMostRecentIngress(route) == routerName {
+			lease.Extend(workKey)
+			//}
 			return writerlease.None, false
 		}
 		log.Info("attempting to change something")
