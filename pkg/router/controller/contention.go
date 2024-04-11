@@ -249,11 +249,13 @@ func ingressEqual(a, b *routev1.RouteIngress) bool {
 	// In addition to the RouteIngress' string fields, compare the available admission condition to determine
 	// if the given ingress' are equal. See https://bugzilla.redhat.com/show_bug.cgi?id=1908389.
 	if len(a.Conditions) != len(b.Conditions) {
+		log.V(4).Info("Contention: Conditions len !=")
 		return false
 	}
 	for j := range a.Conditions {
 		condition := &a.Conditions[j]
 		if cmp.Equal(condition, findCondition(b, condition.Type), cmpopts.IgnoreFields(routev1.RouteIngressCondition{}, "LastTransitionTime")) == false {
+			log.V(4).Info("Condition")
 			return false
 		}
 	}

@@ -32,6 +32,8 @@ type RouteStatusRecorder interface {
 	RecordRouteRejection(route *routev1.Route, reason, message string)
 	RecordRouteUnservableInFutureVersions(route *routev1.Route, reason, message string)
 	RecordRouteUnservableInFutureVersionsClear(route *routev1.Route)
+	RecordRouteConditionTrue(route *routev1.Route, conditionType routev1.RouteIngressConditionType, reason, message string)
+	RecordRouteConditionClear(route *routev1.Route, conditionType routev1.RouteIngressConditionType)
 }
 
 // LogRejections writes route status change messages to the log.
@@ -49,6 +51,14 @@ func (logRecorder) RecordRouteUnservableInFutureVersions(route *routev1.Route, r
 
 func (logRecorder) RecordRouteUnservableInFutureVersionsClear(route *routev1.Route) {
 	log.V(3).Info("route clear unservable in future versions", "name", route.Name, "namespace", route.Namespace)
+}
+
+func (logRecorder) RecordRouteConditionTrue(route *routev1.Route, conditionType routev1.RouteIngressConditionType, reason, message string) {
+	log.V(3).Info("record route condition true", "name", route.Name, "namespace", route.Namespace, "type", conditionType, "reason", reason, "message", message)
+}
+
+func (logRecorder) RecordRouteConditionClear(route *routev1.Route, conditionType routev1.RouteIngressConditionType) {
+	log.V(3).Info("record route condition clear", "name", route.Name, "namespace", route.Namespace, "type", conditionType)
 }
 
 // StatusAdmitter ensures routes added to the plugin have status set.
@@ -143,6 +153,19 @@ func (a *StatusAdmitter) RecordRouteUnservableInFutureVersions(route *routev1.Ro
 // RecordRouteUnservableInFutureVersionsClear clears the UnservableInFutureVersions status back to an unset state.
 func (a *StatusAdmitter) RecordRouteUnservableInFutureVersionsClear(route *routev1.Route) {
 	performIngressConditionRemoval(unservableInFutureVersionsClearAction, a.lease, a.tracker, a.client, a.lister, route, a.routerName, routev1.RouteUnservableInFutureVersions)
+}
+
+func (a *StatusAdmitter) RecordRouteConditionTrue(route *routev1.Route, conditionType routev1.RouteIngressConditionType, reason, message string) {
+	performIngressConditionUpdate(string(conditionType)+"-record", a.lease, a.tracker, a.client, a.lister, route, a.routerName, a.routerCanonicalHostname, routev1.RouteIngressCondition{
+		Type:    conditionType,
+		Status:  corev1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+func (a *StatusAdmitter) RecordRouteConditionClear(route *routev1.Route, conditionType routev1.RouteIngressConditionType) {
+	performIngressConditionRemoval(string(conditionType)+"-clear", a.lease, a.tracker, a.client, a.lister, route, a.routerName, conditionType)
 }
 
 // performIngressConditionUpdate updates the route to the appropriate status for the provided condition.
