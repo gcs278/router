@@ -947,6 +947,22 @@ func TestRouterContentionOnCondition(t *testing.T) {
 			expectContend: true,
 		},
 		{
+			name: "changing condition status with empty reason and message causes contention",
+			conditions: []routev1.RouteIngressCondition{{
+				Type:               routev1.RouteAdmitted,
+				Status:             kapi.ConditionTrue,
+				LastTransitionTime: &notNow,
+			}},
+			updateConditions: []routev1.RouteIngressCondition{{
+				Type:               routev1.RouteAdmitted,
+				Status:             kapi.ConditionFalse,
+				Reason:             "foo",
+				Message:            "foo",
+				LastTransitionTime: &now,
+			}},
+			expectContend: true,
+		},
+		{
 			name: "changing condition reason causes contention",
 			conditions: []routev1.RouteIngressCondition{{
 				Type:               routev1.RouteUnservableInFutureVersions,
