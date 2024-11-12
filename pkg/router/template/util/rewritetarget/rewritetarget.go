@@ -165,6 +165,10 @@ func escapeSingleQuotes(val string) string {
 	return strings.ReplaceAll(val, `'`, `'\''`)
 }
 
+func escapeDoubleQuotes(val string) string {
+	return strings.ReplaceAll(val, `"`, `\"`)
+}
+
 // SanitizeRewritePathInput processes the route's spec.path for use in the <match-regex> argument of the
 // `http-request replace-path <match-regex> <replace-fmt>` configuration in HAProxy. This configuration
 // is enabled when the `haproxy.router.openshift.io/rewrite-target` annotation is provided.
@@ -184,6 +188,17 @@ func SanitizeRewritePathInput(path string) string {
 
 	// Escape single quotes to avoid syntax errors.
 	path = escapeSingleQuotes(path)
+	path = escapeDoubleQuotes(path)
+
+	return path
+}
+
+func SanitizeRewritePathInputQuotesOnly(path string) string {
+	// Escape single quotes to avoid syntax errors.
+	path = escapeSingleQuotes(path)
+	path = escapeDoubleQuotes(path)
+	// Null characters
+	path = strings.ReplaceAll(path, `\x00`, "")
 
 	return path
 }
