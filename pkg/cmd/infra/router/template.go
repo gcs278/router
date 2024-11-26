@@ -108,6 +108,7 @@ type TemplateRouterOptions struct {
 type TemplateRouter struct {
 	WorkingDir                          string
 	TemplateFile                        string
+	CheckScript                         string
 	ReloadScript                        string
 	ReloadInterval                      time.Duration
 	DefaultCertificate                  string
@@ -171,6 +172,7 @@ func (o *TemplateRouter) Bind(flag *pflag.FlagSet) {
 	flag.StringVar(&o.DefaultDestinationCAPath, "default-destination-ca-path", env("DEFAULT_DESTINATION_CA_PATH", ""), "A path to a PEM file containing the default CA bundle to use with re-encrypt routes. This CA should sign for certificates in the Kubernetes DNS space (service.namespace.svc).")
 	flag.StringVar(&o.TemplateFile, "template", env("TEMPLATE_FILE", ""), "The path to the template file to use")
 	flag.StringVar(&o.ReloadScript, "reload", env("RELOAD_SCRIPT", ""), "The path to the reload script to use")
+	flag.StringVar(&o.CheckScript, "check", env("CHECK_SCRIPT", ""), "The path to the reload script to use")
 	flag.DurationVar(&o.ReloadInterval, "interval", getIntervalFromEnv("RELOAD_INTERVAL", defaultReloadInterval), "Controls how often router reloads are invoked. Mutiple router reload requests are coalesced for the duration of this interval since the last reload time.")
 	flag.BoolVar(&o.BindPortsAfterSync, "bind-ports-after-sync", env("ROUTER_BIND_PORTS_AFTER_SYNC", "") == "true", "Bind ports only after route state has been synchronized")
 	flag.StringVar(&o.MaxConnections, "max-connections", env("ROUTER_MAX_CONNECTIONS", ""), "Specifies the maximum number of concurrent connections.")
@@ -552,6 +554,9 @@ func (o *TemplateRouterOptions) Validate() error {
 	if len(o.ReloadScript) == 0 {
 		return errors.New("reload script must be specified")
 	}
+	if o.ExtendedValidation && len(o.CheckScript) == 0 {
+		return errors.New("check script must be specified")
+	}
 	return nil
 }
 
@@ -756,6 +761,7 @@ func (o *TemplateRouterOptions) Run(stopCh <-chan struct{}) error {
 	pluginCfg := templateplugin.TemplatePluginConfig{
 		WorkingDir:                    o.WorkingDir,
 		TemplatePath:                  o.TemplateFile,
+		CheckScriptPath:               o.CheckScript,
 		ReloadScriptPath:              o.ReloadScript,
 		ReloadInterval:                o.ReloadInterval,
 		ReloadCallbacks:               reloadCallbacks,
@@ -812,7 +818,7 @@ func (o *TemplateRouterOptions) Run(stopCh <-chan struct{}) error {
 		plugin = controller.NewUpgradeValidation(plugin, recorder, o.UpgradeValidationForceAddCondition, o.UpgradeValidationForceRemoveCondition)
 	}
 	if o.ExtendedValidation {
-		plugin = controller.NewExtendedValidator(plugin, recorder)
+		plugin = controller.NewExtendedValidator(plugin, recorder, pluginCfg)
 	}
 	if o.AllowExternalCertificates {
 		plugin = controller.NewRouteSecretManager(plugin, recorder, secretManager, kc.CoreV1(), authorizationClient.SubjectAccessReviews())

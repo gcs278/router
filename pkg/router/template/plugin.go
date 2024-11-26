@@ -43,8 +43,10 @@ func newDefaultTemplatePlugin(router RouterInterface, includeUDP bool, lookupSvc
 }
 
 type TemplatePluginConfig struct {
+	CheckOnly                     bool
 	WorkingDir                    string
 	TemplatePath                  string
+	CheckScriptPath               string
 	ReloadScriptPath              string
 	ReloadFn                      func(shutdown bool) error
 	ReloadInterval                time.Duration
@@ -103,6 +105,8 @@ type RouterInterface interface {
 	// Commit applies the changes in the background. It kicks off a rate-limited
 	// commit (persist router state + refresh the backend) that coalesces multiple changes.
 	Commit()
+
+	CheckConfig() error
 }
 
 // createTemplateWithHelper generates a new template with a map helper function.
@@ -144,8 +148,10 @@ func NewTemplatePlugin(cfg TemplatePluginConfig, lookupSvc ServiceLookup) (*Temp
 	}
 
 	templateRouterCfg := templateRouterCfg{
+		checkOnly:                     cfg.CheckOnly,
 		dir:                           cfg.WorkingDir,
 		templates:                     templates,
+		checkScriptPath:               cfg.CheckScriptPath,
 		reloadScriptPath:              cfg.ReloadScriptPath,
 		reloadFn:                      cfg.ReloadFn,
 		reloadInterval:                cfg.ReloadInterval,
@@ -241,6 +247,10 @@ func (p *TemplatePlugin) HandleNamespaces(namespaces sets.String) error {
 func (p *TemplatePlugin) Commit() error {
 	p.Router.Commit()
 	return nil
+}
+
+func (p *TemplatePlugin) CheckConfig() error {
+	return p.Router.CheckConfig()
 }
 
 // endpointsKey returns the internal router key to use for the given Endpoints.

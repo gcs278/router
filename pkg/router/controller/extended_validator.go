@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	templaterouter "github.com/openshift/router/pkg/router/template"
 
 	kapi "k8s.io/api/core/v1"
 
@@ -19,6 +20,8 @@ type ExtendedValidator struct {
 	// plugin is the next plugin in the chain.
 	plugin router.Plugin
 
+	templatePlugin *templaterouter.TemplatePlugin
+
 	// recorder is an interface for indicating route status.
 	recorder RouteStatusRecorder
 }
@@ -26,10 +29,19 @@ type ExtendedValidator struct {
 // NewExtendedValidator creates a plugin wrapper that ensures only routes that
 // pass extended validation are relayed to the next plugin in the chain.
 // Recorder is an interface for indicating route status updates.
-func NewExtendedValidator(plugin router.Plugin, recorder RouteStatusRecorder) *ExtendedValidator {
+func NewExtendedValidator(plugin router.Plugin, recorder RouteStatusRecorder, templatePluginConfig templaterouter.TemplatePluginConfig) *ExtendedValidator {
+	templatePluginConfig.WorkingDir = templatePluginConfig.WorkingDir + "/check"
+	templatePluginConfig.CheckOnly = true
+	templatePluginConfig.DynamicConfigManager = nil
+	templatePlugin, err := templaterouter.NewTemplatePlugin(templatePluginConfig, nil)
+	if err != nil {
+		panic("failed to setup template plugin")
+	}
+
 	return &ExtendedValidator{
-		plugin:   plugin,
-		recorder: recorder,
+		templatePlugin: templatePlugin,
+		plugin:         plugin,
+		recorder:       recorder,
 	}
 }
 
@@ -55,6 +67,15 @@ func (p *ExtendedValidator) HandleRoute(eventType watch.EventType, route *routev
 		p.plugin.HandleRoute(watch.Deleted, route)
 		return fmt.Errorf("invalid route configuration")
 	}
+
+	p.templatePlugin.HandleRoute(watch.Added, route)
+	if err := p.templatePlugin.CheckConfig(); err != nil {
+		log.Error(err, "failed to validate HAProxy config")
+		p.templatePlugin.HandleRoute(watch.Deleted, route)
+		p.recorder.RecordRouteRejection(route, "HAProxyCheckConfigFailed", err.Error())
+		return err
+	}
+	p.templatePlugin.HandleRoute(watch.Deleted, route)
 
 	return p.plugin.HandleRoute(eventType, route)
 }
