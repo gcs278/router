@@ -6,6 +6,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -2337,4 +2339,65 @@ func processCertificate(certPath string) (*x509.Certificate, error) {
 	fmt.Println("Certificate Subject:", cert.Subject)
 
 	return cert, nil
+}
+
+// TestExtendedValidateRoute ensures that a route's certificate and keys
+// are valid.
+func TestExtendedValidateRouteLaptop(t *testing.T) {
+	filepath.Walk("/etc/ssl/certs/", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil // Skip directories
+		}
+
+		if filepath.Ext(path) == ".pem" {
+			cert, err := processCertificate(path)
+			if err != nil {
+				fmt.Println("Error processing certificate:", err)
+			}
+			if !isSelfSignedCert(cert) {
+				t.Fatalf("cert should be self signed")
+			}
+		}
+
+		return nil
+	})
+}
+
+func BenchmarkCheckSignature(b *testing.B) {
+	block, _ := pem.Decode([]byte(testCertificateRsaSha256))
+	if block == nil {
+		b.Fatalf("failure block")
+	}
+
+	// Parse the certificate
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		b.Fatalf("failure to parse cert")
+	}
+
+	for i := 0; i < b.N; i++ {
+		cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature)
+	}
+}
+
+func BenchmarkCheckIssuerAndSubject(b *testing.B) {
+	block, _ := pem.Decode([]byte(testCertificateRsaSha256))
+	if block == nil {
+		b.Fatalf("failure block")
+	}
+
+	// Parse the certificate
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		b.Fatalf("failure to parse cert")
+	}
+
+	for i := 0; i < b.N; i++ {
+		bytes.Equal(cert.RawIssuer, cert.RawSubject)
+		bytes.Equal(cert.AuthorityKeyId, cert.SubjectKeyId)
+	}
 }
