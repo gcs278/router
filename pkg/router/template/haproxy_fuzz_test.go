@@ -1,6 +1,9 @@
 package templaterouter
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/openshift/library-go/pkg/route/validation"
@@ -10,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -272,31 +276,14 @@ func FuzzHAProxyReplacePath(f *testing.F) {
 // This is a different approach. We try to reject a subset of characters to appease the bugs coming in, while we
 // ensure what we are rejecting isn't already a valid approach.
 func apiRejectionLimitedApproach(t *testing.T, routePath string) {
-	// Exceptions in which that we can break compatibility.
-	if strings.Contains(routePath, ` `) && strings.Contains(routePath, `#`) {
-		t.Skipf("Skipping path that contains space AND # even though it'll break compatilbity because this is very RISKY thing to allow")
-	}
-
-	// TODO: You can vendor your library-go function here and call it to test that it is compatible
-	//route := &routev1.Route{
-	//	ObjectMeta: metav1.ObjectMeta{
-	//		Annotations: map[string]string{
-	//			// This just needs to be present, value doesn't matter.
-	//			"haproxy.router.openshift.io/rewrite-target": "/foo",
-	//		},
-	//	},
-	//	Spec: routev1.RouteSpec{
-	//		Path: routePath,
-	//	},
-	//}
-	//
-	//// We just skip the test (success) if it is validated out
-	//if errs := validation.ValidatePathWithRewriteTargetAnnotation(route, nil); len(errs) != 0 {
-
 	// Here we do our "validation" and if we reject something, we want to ensure that
 	// HAProxy actually fails. If it doesn't fail, that means we rejected something valid.
 	// TODO: this if statement is temporary and should be replaced by library-go call for "real" testing.
-	if !fakeSimpleValidation(routePath) {
+	//regexErr := validateHAProxyRegex(routePath)
+	if pathWithRewriteHasInvalidChars(routePath) { //|| regexErr != nil {
+		if acceptableIncompatibility(routePath) {
+			t.Skipf("accepted that %s is an acceptable incompatiblity", routePath)
+		}
 		// Create a HAProxy config file with the fuzzed replace-path directive
 		configFile, err := createHAProxyConfig(routePath, haproxyConfTemplate)
 		if err != nil {
@@ -309,11 +296,44 @@ func apiRejectionLimitedApproach(t *testing.T, routePath string) {
 			t.Errorf("Rejected, but HAProxy did NOT fail to start with replace-path %s: %v", routePath, err)
 		}
 	}
+	// TODO: Turning on this logic can help understand what other gaps in validation still exist.
+	//       We still can't easily reject regexes.
+	//} else {
+	//	// Create a HAProxy config file with the fuzzed replace-path directive
+	//	configFile, err := createHAProxyConfig(routePath, haproxyConfTemplate)
+	//	if err != nil {
+	//		t.Fatalf("failed to create HAProxy config: %v", err)
+	//	}
+	//	defer os.Remove(configFile) // Clean up config file
+	//
+	//	// Start HAProxy with the fuzzed config
+	//	if err := validateHAProxyConfig(configFile); err != nil && !strings.Contains(err.Error(), "failed to parse the regex") {
+	//		t.Errorf("NOT rejected, and HAProxy did fail to start with replace-path which wasn't a regex error %s: %v", routePath, err)
+	//	} else if err != nil && strings.Contains(err.Error(), "failed to parse the regex") {
+	//		t.Errorf("NOT rejected, and HAProxy did fail to start with replace-path which WAS regex error %s: %v", routePath, err)
+	//		//logErrorToFile(err.Error())
+	//	}
+	//}
 }
 
-func fakeSimpleValidation(routePath string) bool {
+func acceptableIncompatibility(routePath string) bool {
+	// These regex metacharacters are really hard to determine if invalid
+	//if strings.Contains(routePath, `[`) ||
+	//	strings.Contains(routePath, `{`) {
+	//	return true
+	//}
+	if strings.Contains(routePath, ` `) && strings.Contains(routePath, `#`) {
+		//t.Skipf("Skipping path that contains space AND # even though it'll break compatibility because this is very RISKY thing to allow")
+		return true
+	}
+	return false
+}
+
+// pathWithRewriteHasInvalidChars validates the routePath, rejecting various HAProxy configuration errors.
+func pathWithRewriteHasInvalidChars(routePath string) bool {
 	inDoubleQuotes := false
 	inSingleQuotes := false
+
 	for i := 0; i < len(routePath); i++ {
 		c := routePath[i]
 		if c == '"' {
@@ -340,10 +360,96 @@ func fakeSimpleValidation(routePath string) bool {
 
 		if !inDoubleQuotes && !inSingleQuotes && (c == ' ' || c == '#') {
 			// Reject if space or # is outside double or single quotes.
-			return false
+			return true
+		}
+
+		// Reject "forbidden first char in environment variable name" errors.
+		if inDoubleQuotes && c == '$' && i+1 < len(routePath) {
+			next := routePath[i+1]
+			// Reject if the character following $ is not a letter or _.
+			if !unicode.IsLetter(rune(next)) && next != '_' {
+				// HAProxy also allows $. followed by some internal pseudo-variables, but we will reject them.
+				// See HAproxy's parse_line function in tools.c for more info.
+				return true
+			}
 		}
 	}
-	return true
+
+	return inDoubleQuotes || inSingleQuotes
+}
+
+// validateHAProxyRegex validates a Go regex by checking for complete matched (), rejecting [ and {, and fixing "nothing to repeat" errors.
+func validateHAProxyRegex(pattern string) error {
+	// Reject unescaped [ and { as they make regex parsing complex
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] == '[' || pattern[i] == '{' {
+			if i == 0 || pattern[i-1] != '\\' {
+				return errors.New("invalid regex: contains unescaped '[' or '{'")
+			}
+		}
+	}
+
+	// Ensure parentheses are balanced
+	openParens := 0
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] == '(' {
+			if i == 0 || pattern[i-1] != '\\' {
+				openParens++
+			}
+		} else if pattern[i] == ')' {
+			if i == 0 || pattern[i-1] != '\\' {
+				openParens--
+				if openParens < 0 {
+					return errors.New("invalid regex: unmatched closing parenthesis")
+				}
+			}
+		}
+	}
+	if openParens != 0 {
+		return errors.New("invalid regex: unmatched opening parenthesis")
+	}
+
+	// Check for "nothing to repeat" errors by ensuring * and + are not preceded by invalid characters
+	invalidChars := map[rune]bool{
+		'$':  true,
+		'^':  true,
+		'\'': true,
+		'+':  true,
+	}
+	for i := 1; i < len(pattern); i++ {
+		if (pattern[i] == '*' || pattern[i] == '+') && invalidChars[rune(pattern[i-1])] {
+			return errors.New("invalid regex: nothing to repeat before '*' or '+'")
+		}
+	}
+
+	// Finally, try compiling it as a Go regex
+	_, err := regexp.Compile(pattern)
+	if err != nil {
+		return errors.New("invalid regex: failed to compile")
+	}
+
+	return nil
+}
+
+// logErrorToFile appends an error message to a file
+func logErrorToFile(errorMessage string) {
+	var buffer bytes.Buffer
+	scanner := bufio.NewScanner(strings.NewReader(errorMessage))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "failed to parse the regex") {
+			buffer.WriteString(line + "\n")
+		}
+	}
+
+	if buffer.Len() > 0 {
+		file, err := os.OpenFile("/tmp/haproxy_errors.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return
+		}
+		defer file.Close()
+		file.Write(buffer.Bytes())
+	}
 }
 
 // this function resembles the approach we COULD take if we sanitized the HAProxy template.
